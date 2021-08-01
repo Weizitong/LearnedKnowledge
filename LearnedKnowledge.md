@@ -195,10 +195,144 @@ The following graph is the example of handling inconsistency by vector clock.
 ![VC_Text](pics/text_vc.png)    
 
 **No conflict**
-X = D([S0, 1][S1, 1])
-Y = D([S0, 2][S1, 1])
-X is the ancestor of Y    
+S0 = D([S0, 1][S1, 1])    
+S1 = D([S0, 2][S1, 1])    
+S0 is the ancestor of S1, because every entry of S0 is <= corresponding entry in S1    
 
-**Conflict**
-X = D([S0, 1][S1, 2])
-Y = D([S0, 2][S1, 1])
+**Conflict** 
+S0 = D([S0, 1][S1, 2])    
+S1 = D([S0, 2][S1, 1])    
+Conflict is detected between S0 and S1. On S0, it believes node S1 has the newer version, but S1 believes S0 has the version. Then the conflict happens. Then we need to let client decide which version shall we choose.     
+    
+### Handling failures
+#### Failure detection: Gossip protocol
+- Each node maintains a node membership list, which contains member IDs and heartbeat counters.
+- Each node periodically increaments its heartbeat counter.
+- Each node periodically sends heartbeats to a set of random nodes, which in turn propagate to another set of nodes.
+- Once nodes receive heartbeats, membership list is updated to the latest info.
+- If the heartbeat has not increased for more tham predefined periods, the member is considered as offline.
+
+#### Handling temporary failures: Sloppy quorum & Hinted handoff
+- Instead of enforcing the quorum requirement, the system choose the first W healthy servers for writes and first R healthy servers for reads on the hash ring. Offline servers are ignored.
+- If a server is unavailable due to network of server failures, another server will process requests temporarily.
+
+#### Handling permanent failures: Anti-entropy protocal & Merkle tree
+- Anti-entropy protocal: Compare each piece of data on replicas and updating each replica to the newest version.
+- Merkle tree: Inconsistency detection and minimizing the amount of data transferred.
+Bucketize the data on each node.
+![Bucketized_data](pics/bucketized_data.png)
+Hash each bucket, and the parent of 2 bucket, and 2 parents... until we have 1 hash value for a node.    
+![Merkle tree](pics/merkle_tree.png)    
+
+#### Handling data center outage
+Replicate data cross the data centers
+
+## System architecture diagram
+![kv_arch](pics/kv_arch.png)
+
+### Write Path
+![WritePath](pics/WritePath.png)
+1. Use SSTable on disk to store data (Data durability) (Flush from Mem while is full or beyond the threshold).
+2. Write down every commit in log.
+3. Data is saved in memory.
+
+### Read Path
+**Read data from memory firstly**
+![ReadPath1](pics/ReadPath1.png)
+**Check SSTable if cannot find**
+![ReadPath1](pics/ReadPath2.png)
+1. Check memorty firstly.
+2. Use bloom filter to find data in SSTable if memory does not have the key.
+
+# Design a unique ID generator in distributed systems
+## Multi-master replication
+Multi master write. For the server ith (0 based), the generated ID will be new_id = i + (ithCall * N), where N is the total number of servers in the clusters.
+**Pros:**
+- Easy to implement
+**Cons:**
+- Hard to scale out
+- IDs do not go up with time across multiple servers
+
+## Universally unique identifier
+A 128-bit length string generator. Few chance to have a conflict. Therefore, we just put this ID into different servers.
+
+## Ticket server
+Centralized ticket server generate ID for each API server. However, ticket server is a SPF and if we use multi-ticket servers design, it will introduce the challenge to do synchronization among each ticket servers.
+
+## Twitter snowflake approach
+![Snowflakes](pics/snowflake.png)
+
+# Web Crawler
+## Clarify questions
+1. Scalability: Highly parallelization.
+2. Robustness: Bad HTML, unresponsive servers, crashes, malicious link, etc.
+3. Politeness: Dont send too many requests to a website within a short time inverval.
+4. Extensibility: The system is flexible so that minimal changes are needed to support new content types.
+
+## Dive Deep on questions
+### BFS issue
+1. Most links from the same page are linked back to the same host (May cause an impolite visit).
+2. Standard BFS does not take the priority of a URL into considerations.
+
+### URL frontier
+1. Address politeness: 
+![polite](pics/web_crawler_polite.png)
+2. Use PageRank to assign weight to each url. Different weights will flow to different queues.
+![frontier](pics/frontier.png)
+3. Fressness: Recrawl based on history or importaness.
+4. Storage: Cache + disk
+
+### HTML Downloader
+#### Robots.txt
+Robots Exclusion Protocal. It specifies what pages crawlers are allowed to download.
+
+#### Performance optimization
+1. Distributed crawl
+2. Cache DNS Resolver (Cache Map<Url, IP_Addr>)
+3. Locality (Crawl closer server)
+4. Short timeout
+
+### Robustness
+- Consistent hashing
+- Save crawl states and data: A disrupted crawl can be restarted easily by loading saved states and data.
+- Exception handling: Dont crash the system.
+- Data validation*
+
+### Detect and avoid problematic content
+1. Redundant content: Hashes or checksums help to detect duplication.
+2. Spider traps: Set a length for maximal length for URLs.
+3. Data noise: Exclude useless data, such as ads, spam, etc.
+
+### Moreover techniques
+1. Server-side rendering
+2. Filter out unwanted pages
+3. DB replication and sharding
+4. Horizontal scaling
+5. Availability, consistency, and reliability.
+6. Analytics.
+
+# Design a notification system
+## Scope and requirements questions:
+1. What type of devices?
+2. Is it a real-time system (do we accept delay)?
+3. What types of notifications does the system support?
+4. What triggers notification?
+5. Will users be able to opt-out?
+6. How many notifications are sent out each day? (QPS)
+
+## Different types of notifications
+1. iOS use APN (Apple push notification)
+2. Android push notification - Firebase Cloud Messaging (FCM)
+3. SMS message (Twilio, Nexmo)
+4. Email (Sendgrid, Mailchimp)
+
+## Contact info gathering flow
+**Workflow**
+![Contact gather flow](pics/contact_gather.png)
+
+**Schema**
+![User info](pics/userinfo_table.png)
+
+**High level design**
+![PN design](pics/PN_design.png)
+
