@@ -333,6 +333,255 @@ Robots Exclusion Protocal. It specifies what pages crawlers are allowed to downl
 **Schema**
 ![User info](pics/userinfo_table.png)
 
-**High level design**
+## High level design
 ![PN design](pics/PN_design.png)
+1. **Service 1 to N**: A service can be a micro-service, a cron job, or a distributed system that triggers notification sending envets.
+2. **Notification servers**:
+    - Provide APIs for services to send notifications, Those APIs are only accessible internally or by verified clients to prevent spams.
+    - Carry out basic validations to verify emails, phone numbers, etc.
+    - Query the database or cache to fetch data needed to render a notification.
+    - Put notification data to message queues for parallel processing.
+3. **Cache**: User info, device info, notification templates are cached.
+4. **DB**: User, notification, setting, etc.
+5. **Message queue**: Remove the dependencies between components. Serve as a buffer. 3rd party outage will affect our service
+6. **Workers**: Pull request from MQ and send to 3rd party notification services.
 
+## Design deep dive
+### Reliability
+Use log to record whether a notification send successfully or not. + Retry mechanism.    
+To ensure a notification will be sent only once, we can use even_id to track each notification. Filter our duplicate notification requests. (However, it still hard to completely eliminate this issue).
+![Log](pics/PNLog.png)
+
+### Additional components and consideration.
+#### Notification template
+A predefined notification message format. Maintain the information consistency and avoid unforeseem margin edge cases.    
+e.g. Your driver [NAME] is on the way.
+
+#### Notification setting
+User can decide: Receive or not receive a notification, and decide receive what kind of notifications.       
+e.g.    
+user_id bigInt
+channel varchar
+opt_in boolean
+
+#### Rate limiting
+We should limit the number of notifications in a period of time. Otherwise, uesrs may opt-out completely.
+
+#### Retry mechanism
+Retry in like 10 times, or send alert to developers.
+
+#### Security in PN
+Use appKey and appSecret are used to secure PN APIs. Only authed or verified clients can send PN using our APIs.
+
+#### Monitor queued notifications
+Telemetry to monitor PN perf, delay for data analysis.
+
+#### Events tracking
+Notification metrics, such as open rate, click rate, and engagement. ----> Understand cx's behaviors.
+![tracking](pics/PN_eventTrack.png)
+
+### Updated Design
+![updated](pics/updatedPN.png)
+
+# Design a news feed system
+## High level design
+### Newsfeed API
+#### Feed publishing API
+HTTP POST API:
+```
+POST /v1/me/feed
+Params:
+• ContentL Content is the text of the post
+• auth_token: Auth use
+```
+
+#### Newsfeed retrieval API
+HTTP GET API:
+```
+GET /v1/me/feed
+Params:
+• auth_token: it is used to auth API requests.
+```
+
+### Feed publishing
+Workflow:    
+![workflow](pics/feeds_sys.png)
+
+### News feed building
+Workflow:
+![workflow](pics/feed_building.png)
+
+## Dive deep
+### Feed publishing deep dive
+![workflow](pics/feedpub_deep.png)
+#### Web servers
+Besides communicating with clients, web servers enforce auth and rate-limiting.
+#### **Fanout service**
+##### Fanout on write (push model)
+News feed is pre-computed during write time. Deliver to friemds immediately once it is published.    
+**Pros**    
+- The news feed is generated in real-time and can be pushed to friends immediately.
+- Fetching news feed is fast because the news feed is pre-computed during write time.
+**Cons**     
+- If a user has too many friends, fetching the friend list and generating news feed for all of them are slow and time consuming. It is called hotkey problem.
+- For inactive users or those rarely log-in, pre-computing news feeds waste computing resouces.
+##### Fanout on read (read model)
+The news is generated during the read time.
+**Pros**    
+- For inactive users or those who rarely log in, fanout on read works better because it will not waste computing resouce on them.
+- Data in not pushed to friends so there is no hotkey problem
+**Cons**     
+- Slow on updating feed.    
+    
+Use hyprid model:    
+- For majority users, we use push.
+- For the users who have many friends, we use pull model to avoid system overload issue.
+![Fanout](pics/fanout.png)
+
+### Newsfeed retrieval deep dive
+[!workflow](pics/newsretrieval.png)
+1. User request feeds
+2. LB routes request
+3. Web servers call the news feed service
+4. News feed service get a list of post IDs from the news feed cache
+5. The fetched result is a fully hydrated feed.
+6. Send back to client for rendering.
+
+### Cache architecture
+![news_feed](pics/NF_cache.png)
+- News feed: It stores IDs of news feeds.
+- Content: It stores every post data. Popular content is stored in hot cache
+- Social Graph: It stores user relationship data
+- Action: It stores info about whether a user like a post, replied a post, or took other actions on a post.
+- Counters: It stores counters for like, reply, follower, following, etc.
+
+# Design a chat system
+- mobile app or web app?
+- scale?
+- group chat support? Size?
+- Important features
+- Message size limit
+- E2E encryption required?
+- How long shall we save the chat history
+
+## High level design
+![chatsys](pics/chatsys.png)
+From the sender side, we can use long-alive HTTP protocol to send message to the server.    
+However, what protocal or mechanism we can use to let server relay the message to the receiver?    
+
+### Server-initiated connection: Polling
+![polling](pics/chat_polling.png)
+Client periodically poll messages from the server
+
+### Server-initiated connection: Long polling
+![longpolling](pics/chat_longPolling.png)
+#### Drawback
+- Sender and receiver may not connect the same chat server, HTTP based servers and usually stateless. If you use round robin for LB, the server that receives the message might not have a long-polling connection with the client who receives the message.
+- A server has no good way to tell if a client is disconnected.
+- It is inefficient. If a user does not chat much, long polling still makes periodic connections after timeouts.
+
+### WebSocket
+![websocket](pics/webSocket.png)
+WebSocket is a connectio which support bi-directional communication based on TCP. The WS can be used for both sending and receiving message.
+
+### High-level design
+![stateless](pics/Chat_Stateless.png)
+
+#### Stateless services
+Used to manage the login, signup, user profile, etc.    
+LB routes the request to the correct service. The above service can be micro-serivces or monolithic.    
+
+#### Stateful service
+Only for chat service. The service discovery coordinates closely with the chat service to avoid server overloading.
+
+#### 3rd-party integration
+This usually is notification system.
+
+#### Scalability
+![stateless](pics/updated_chatsys.png)
+- Chat servers facilitate message sending/receiving.
+- Presence servers manage online/offline status
+- API servers handle everything including login, signup, change profile, etc.
+- Notification servers send push notifications,
+- Finally, the key-value store is used to store chat history. When offline users come back online, she/he will see al her/his previous chat history.
+
+#### Storage
+**SQL vs NoSQL**    
+2 types of data:    
+- Generic data: User profile, setting, user friend list. ----> Save in robust SQL DB. (We shall use sharding and replication to improve the perf)
+- Chat history data.
+  - The amount of data is enormous for chat system.
+  - Only recent chats are accessed frequently.
+  - Still need to support random access: Like searching in history.
+  - R : W =~ 1 : 1
+
+Here are the reasons for why we choose K-V Store:
+- K-V allows easy horizontal scaling.
+- K-V stores provide very low latency to access data/
+- SQL DB does not handle long tail of data well. When the indexes grow large, random access is expensive.
+- K-V stores are adopted by other proven reliable chat app. E.g. both FB messenger and Discored use K-V. FB usese HBase, and Discord uses Cassandra.
+
+### Data models
+#### Message table for 1:1 chat
+![11msg](pics/11msg.png)
+Use message_id to show the order of the message. We cannot rely on created_at, since there might have 2 msgs, created at the same time.
+#### Message table for group chat
+![group](pics/groupmsg.png)
+PK is (channel_id, message_id). channel_id is the partition key because all queries in a group chat operate in a channel.    
+2 requirements for message_id:    
+1. IDs must be unique.
+2. IDs should be sortable by time, meaning new rows have higher IDs than old ones.
+To achieve those, we can use a local id generator. (Use Twitter snowflake ID generator to generate the sequence).
+
+## Dive deep
+### Service discovery
+![servicedisc](pics/servicedisc.png)
+The primary role of service discovery is to recommend the best chat server for a client absed on the criteria like geographical location, server capacity, etc. Apache Zookeeper is a popular open-source solution for service discovery.    
+There are some other system we can use to provide service discovery like [Consul](https://www.consul.io/docs) and [Etcd](https://etcd.io/).
+
+### Message flows
+#### 1 : 1
+![1:1](pics/11chatflow.png)
+1. User A -> Chat Server 1 (CS-1)
+2. CS-1 obtains the message ID from the ID generator
+3. CS-1 sends the message to the message sync queue
+4. The message is stored in a K-V store.
+5. Receiver Cases:    
+  a. If B is online, the message is forwared to CS-2 where user B is connected.    
+  b. If B is offline, a push notification is sent from PN servers.
+6. CS-2 forwards the message to User B. There is a persistent WebSocket connection between User B and CS-2.
+
+#### Message sync across multiple devices
+![MsgSync](pics/multiDeviceSync.png)
+2 devices from the same user will connect to the same Chat server. Each device maintain a var called `cur_max_message_id`, which keeps track of the latest message ID on the device. While a message matches the following 2 conditions, sync the msg:
+1. The recipient ID is equal to the current logged-in ID.
+2. Message ID in the KV > `cur_max_message_id`.
+
+#### Small group chat flow
+Use a message sync queue to cache the message. Each recipient has a sync queue, which acts like a mail inbox.
+
+##### Sender side
+![smallgroupchat](pics/smallgroupchat.png)
+
+##### Recipient side
+![smallgroupreceive](pics/smallgroupreceive.png)
+
+### Online Presence
+Status indicator also need the websocket. There are many ways to trigger this.
+
+#### User login
+After the WS connection is built between the client and real-time service, user A's online status and last_active_at timestamp are saved in KV store. Presence Indicator shows the user is online after she/he logs in.
+![cs_userlogin](pics/cs_userlogin.png)
+
+#### User logout
+When a user logout, it goes through the user logout flows as shown below. The online status is changed to offline in the K-V store. The indicator shows a user is offline.
+![cs_userlogout](pics/cs_userlogout.png)
+
+#### User disconnection
+If we simply switch the user to offline while the connection is broken, then if the user on the train and go through the tunnel. The presence indicator will switch the status frequently.    
+Therefore, we use heartbeat to detect whether user has disconnected. 
+![heartbeat_to_show_online](pics/heartbeat_to_show_online.png)
+
+#### Online status fanout
+![OnlineStatusFanout](pics/online_status_fanout.png)
+We use a publish-subscribe model, in which each friend pair maintains a channel. When User A's online status changes, it publishes the event to three channels, channel A-B, A-C and A-D. Those three channels are subscribed by User B, C and D, respectively. Thus, it is easy for friends to get online status updates. The communication between clients and servers is through real-time WebSocket. (If we have to do this for million users, we have to ask cx to refresh manually).
