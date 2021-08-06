@@ -585,3 +585,197 @@ Therefore, we use heartbeat to detect whether user has disconnected.
 #### Online status fanout
 ![OnlineStatusFanout](pics/online_status_fanout.png)
 We use a publish-subscribe model, in which each friend pair maintains a channel. When User A's online status changes, it publishes the event to three channels, channel A-B, A-C and A-D. Those three channels are subscribed by User B, C and D, respectively. Thus, it is easy for friends to get online status updates. The communication between clients and servers is through real-time WebSocket. (If we have to do this for million users, we have to ask cx to refresh manually).
+
+# Design a search autocomplete system
+## Design scope & questions
+- Is the matching only supported at the beginning of a search query or in the middle as well?
+- How many auto complete suggestions should the system return?
+- Does the system support spell check?
+- Are search queries in English?
+- Do we allow capitalization and special characters?
+- How many users use the product?
+
+### Requirements
+- Fast response time.
+- Relevant
+- Sorted
+- Scalable: High traffic
+- HA
+
+## High-leve design
+The service can be divided into 2 parts which are:
+- Data gathering service: It gathers user input queries and aggregates them in real-time. Real-time processing is not practical for large data set.
+- Query service: Given a search query or prefix, return 5 most frequently searched terms.
+
+### Data gathering serviec
+Use a table to record the frequency of each word. When user input: "twitch". "twitter", "twitter" and "twillo" sequentially, the table will be changed as the following trajectory:    
+![countTable](pics/word_freq.png)
+
+### Query service
+Assume we have a large table collecting by 1st service. Then, while user types "tw", it will automatically complete the sentence based on the table.    
+We can do like:
+``` SQL
+SELECT * FROM frequency_table 
+WHERE query like `prefix%` 
+ORDER BY frequency DESC 
+LIMIT 5
+```
+## Deep dive
+Optimize the following areas:
+- Trie data structure
+- Data gathering service
+- Query service
+- Scale the storage
+- Trie operations
+
+### Trie data structure
+Sample:
+![trie](pics/trie_example.png)
+For each node, we can add an integer to indiciate the freq.    
+#### Workflow
+Terms:
+- p: length of prefix
+- n: total number of nodes in a trie
+- c: number of children of a given node
+
+Steps:
+1. Find the prefix. O(p)
+2. Traverse subtree to get all valid children. A child is valid if it can form a valid query string. O(c)
+3. Sort the children and get top k. O(clogc)
+   
+#### Optimization
+1. Limit the max length of a prefix. O(p) -> O(constant)
+2. Cache top search queries at each node, check the below graph.
+![trieWithCache](pics/trie_cache.png)
+
+### Data gathering service
+The real-time update system significant slow down the perf. And it is unneccessary to update the trie frequently.    
+
+The below graph shows the updated workflow:    
+![updated_flow](pics/data_gathering.png)
+
+### Analytics logs
+Raw log data. Append only and not idxed.
+
+### Aggregators
+The interval between 2 aggregating operation is depending on the importance of the real-time result. Like Twitter it may be 2-3 days, Google may be 1 week ish.
+
+### Aggregated data
+Aggregate the raw data together. Like counting the query times, so that we can update the trie tree later.
+
+### Workers
+Async workers do trie tree update.
+
+#### Trie cache
+Trie cache is distributed cache system that keeps trie in memory for fast read. It takes a weekly snapshot of the DB.
+
+#### Trie DB
+2 options are available to store the data:
+1. Doc store: Periodically take a snapshot of it, serialize it, and store the serialized data in the database. MongoDB is one of the best choices.
+2. K-V store: A trie can be represented in a hash table form by applying the following logic:
+   1. Every prefix in the trie is mapped to a key in a hash table.
+   2. Data on each trie node is mapped to a value in a hash table. The below graph shows how we K-V store save the trie.
+![KVTrie](pics/kvtrie.png)
+
+### Query service
+The improved design shows as follow:
+![improved_qs](pics/improved_autocomplete_design.png)
+1. A search query is sent to the LB.
+2. The LB routes the request to API servers.
+3. API servers get trie data from Trie Cache and construct autocomplete suggestions for the client.
+4. In case the data is not in trie cache, we replenish data back to the cache.
+
+**Query service optimized**    
+- AJAX request. For web applications, browsers usually send AJAX requests to fetch autocomplete results. The main benefit of AJAX is that sending/receiving a request/response does not refresh the whole web page.
+- Browser cachng.
+- Data sampling: We dont need to sample every request which are too many.
+
+## Trie operations
+### Create
+Created by workers using aggregated data. The source of data is from Analytics Log/DB
+
+### Update
+There are 2 options:
+1. Update the trie weekly. Once a new trie is created, the new trie replaces the old one.
+2. In-place update. We should avoid this if the trie is large.
+
+### Delete
+We have to delete those hateful, violent, sexually explicit, or dangerous autocomplete suggestions. We add a filter layer in front of the trie cache to filter out unwanted suggestions. Have a filter layer gives us the flexibility of removing results based on different filter rules. Unwanted suggestions are removed physically from the databse asynchronically so the correct data set will be used to build trie in the next update cycle.
+![filterLayer](pics/trie_filter.png)
+
+## Scale the storage
+We can split data based on the 1st character. We analyze historical data distribution pattern and apply smarter sharding logic, shown as below. We use a shard map manager maintains a lookup database for identifying where rows should be stored.
+![smarter_sharding](pics/smarter_trie_sharding.png)
+
+## Other questions
+### Multiple languagse?
+Then we should use the unicode.
+
+### What if top queries in one country are different from others?
+Different countries with different trie trees. Use CDN to expedite the query speed.
+
+### How can we support the trending (real-time) search queries?
+A few tips here (need more reading materials):
+- Reduce the working data set by sharding
+- Change the ranking model and assign more weight to recent search queries.
+- Data may come as streams, so we do not have access to all the data at once. Streaming data means data is generated continuously. Stream processing requires a different set of streams: **Apache Hadoop MapReduce**, **Apache Spark Streaming**, **Apache Storm**, **Apache Kafka**, etc.
+
+# Design YouTube
+## Requirements and scope questions
+1. What features are important?
+2. What clients do we need to support?
+3. DAU?
+4. Average daily time spent on the product?
+5. Do we need to support international users?
+6. What are supported video resolutions?
+7. Is encryption required?
+8. Any file size requirement for videos?
+9. Can we leverage some of the existing cloud infra provided by Amazon, Google, or Microsoft?
+
+## High-level design
+Overview:
+![overview](pics/u2b_overview.png)
+**Client**: Web, mobile, TV, etc     
+**CDN**: Videos are stored in CDN.    
+**API Servers**: Everything else except video streaming goes through API servers. This includes feed recommendation, generating video upload URL, updating metadata database and cache, user signup, etc.     
+
+### Video uploading flow
+workflow:
+![upload](pics/video_upload.png)
+- Users
+- LB: Distribute requests
+- API servers: Handle user requests
+- Metadata DB: Video metadata DB. Sharded and Replicated to meet HA and perf.
+- Metadata cache
+- Original storage: A blob storage system is used to store original videos.
+- Transcoding servers: Video transcoding is also called video encoding. Convert a video format to other formats (MPEG, HLS, etc), which provides the best video streams possible for different devices and bandwidth capabilities.
+- Transcoded storage: It is a blob storage that stores transcoded videos files.
+- CDN: Video are cached in CDN. When you click plan button, a video is streamed from the CDN.
+- Completion queue: It is a MQ that stores info about video transcoding completion events.
+- Completion handler: This consists of a list of workers that pull event data from the completion queue and update metadata cache and database.
+
+The workflow can be divided into 2 parallel processes:
+#### Upload the actual video
+[upload_video](pics/upload_actual_video.png)
+1. Videos are uploaded to the original storage
+2. Transcoding servers fetch videos from the original storage and start transcoding
+3. Once transcoding is complete, the following 2 steps are executed in parallel:
+   1. Transcoded videos are sent to transcoded storage.
+      1. Transcoded videos are distributed to CDN.
+   2. Transcoding completion events are queued in the completion queue.
+      1. Completion handler contains a bunch of workers that continuously pull event data from the queue.
+      2. Completion handler updates the metadata database and cache when video transcoding is complete.
+4. API servers inform the client the video is successfully uploaded and is ready for streaming.
+   
+#### Update the metadata
+Overview:
+![metadata](pics/u2b_update_metadata.png)
+
+### Video streaming flow
+**Streaming Protocol**: 
+- MPEG-DASH. MPEG stands for "Moving Picture Expets Group" and DASH stands for "Dynamic Adaptive Streaming over HTTP"
+- Apple HLS. HLS stands for "HTTP Live Streaming"
+- Microsoft Smooth Streaming
+- Adobe HTTP Dynamic Streaming (HDS)
+
+## Dive deep
