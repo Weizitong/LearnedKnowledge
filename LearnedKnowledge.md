@@ -779,3 +779,117 @@ Overview:
 - Adobe HTTP Dynamic Streaming (HDS)
 
 ## Dive deep
+### Video transcoding
+Reasons for transcoding:
+- Raw video consumes large amount of storage space. An hour-long high definition video recorded at 60 frames per second can take up a few hundred GB of space.
+- Many devices and browers only support certain types of video formats. Thus, it is important to encode a video to different format for compatibility reason.
+- To ensure users watch high quality videos while maintaining smooth playback, ti is a good idea to deliver higher resolution video to users who have high network bandwidth and lower resolution video to users who have low bandwidth.
+- Network conditions can change, especially on mobile devices. We should support auto/manually switch video quality based on the network condition.
+
+2 main parts of encoding formats:
+1. Container: This is like a basket that contains the video file, audio, and metadata. You can tell the container format by the file extension, such as .avi, .mov or .mp4.
+2. Codecs: These are compression and decompression algo aim to reduce the video size while preserving the video quality. The most used video codecs are H.264, VP9, and HEVC.
+
+### Directed acyclic graph (DAG) model
+Different content creators may have different video processing requirements. E.g. some content creators require watermark on top of their videos, some provide thumbnail images, and some upload high definition videos, etc.    
+    
+We adopt a DAG (Directed acyclic graph) model to achieve flexibiilty and parallelism for different tasks.    
+![DAG](pics/DAG.png)    
+
+- Insepection: Make sure videos have good quality and are not malformed.
+- Video encodings: Videos are converted to support different resolutions, codec, bitrates, etc.
+- Thumbnail.
+- Watermark.
+
+![Video encoding](pics/video_encoding.png)
+
+### Video transcoding architecture
+The proposed video transcoding architecture that leverages the cloud services, is shown below:
+![video transcoding arch](pics/video_transcoding_arch.png)
+
+#### Preprocessor
+4 responsibilities:
+1. Video splitting: Video stream is split or further split into small Group of Pictures (GOP) alignment. GOP is a group/chunk of frames arranged in a specific order. Each chunk is an independently playable unit, usually a few seconds in length.
+2. Some old mobile devices or browsers might not support video splitting. Preprocessor split videos by GOP alignment for old clients.
+3. DAG generation: The processor generates DAG based on configuration files client programmers write.
+4. Cache data. The preprocessor is a cache for segmented videos. For better reliability, the preprocessor stores GOPs metadata in temporary storage. If video encoding fails, the system could use persisted data for retry operations.
+
+#### DAG scheduler
+The DAG scheduler splits a DAG graph into stages of tasks and puts them in the task queue in the resource manager. The below graph is an example:
+![DAG_scheduler](pics/DAG_scheduler.png)
+
+#### Resource manager
+The resource manager is responsible for managing the effciency of resource allocation. It contains 3 queues and a task scheduler.
+![Resource_manager](pics/video_resource_manager.png)
+
+- Task queue: The priority queue that contains tasks to be executed.
+- Worker queue: The priority queue that contains worker utilization info.
+- Running queue: The queue contains info about the currently running tasks and workers running the tasks.
+- Task scheduler: It picks the optimal task/worker, and instructs the chosen task worker to execute the job.
+
+**Workflow**    
+1. The task scheduler gets the highest priority task from the task queue.
+2. The task scheduler gets the optimal task worker to run the task from the worker queue.
+3. The task scheduler instructs the chosen task worker to run the task.
+4. The task scheduler binds the task/worker info and puts it in the running queue.
+5. The task scheduler removes the job from the running queue once the job is done.
+
+#### Task workers
+Runs the tasks which are defined in the DAG. Different task workers may run different tasks:
+- Watermark workers stamp watermarker on the video.
+- Encoder workers encode the video.
+- etc.
+
+#### Temporary storage
+Multiple storage types are used here. It depends on what data and types will be stored. E.g.
+- The metadata is frequently accessed by workers. Then memcache would be best choice
+- Video or audio is too large, so we keep them in blob storage.
+All data in temporary storage is freed up once the corresponding video processing is complete.    
+
+#### Encoded video
+Encoded video is the final output of the encoding pipeline.
+
+### System optimizations
+#### Speed optimization: parallelize video uploading
+Uploading a video entirely is inefficient. We should split them into multiple GOPs. The splitting task can be implemented by the client.
+![client_splitting](pics/client_split.png)
+
+#### Speed optimization: place upload centers close to users
+Use CDN to allow user uploads the video to the closest servers.
+
+#### Speed optimization: parallelism everywhere
+Loosely coupled system and enable high parallelism.     
+Use message queue everywhere.    
+![MQ_encode](pics/mq_encoded.png)
+
+#### Safety optimization: pre-signed upload URL
+Check below figure:
+![presign](pics/presigned_url.png)
+1. The client makes a HTTP request to API servers to fetch the pre-signed url (named in AWS S3. in Azure blob storage, called Shared Access Key).
+2. API servers respond with pre-signed URL.
+3. The client use the fetched url to upload video.
+
+#### Safety optimization: protect your videos
+To protect the copyright, 3 options can be applied:
+1. Digital rights management (DRM) systems: Apple FairPlay, Google Widevine, and Microsoft PlayReady.
+2. AES encryption: You can encrypt a video and configure an authorization policy. The encrypted video will be decrypted upon playback. This ensures that only authorized users can watch an encrypted video.
+3. Visual watermarking.
+
+#### Cost-saving optimization
+YouTube video stream follow long-tail distribution. Many videos are rarely watched. So:
+1. Only serve the most popular videos from CDN and other videos from our high capacity storage servers.
+2. For less popular content, we may not need to store many encoded video versions. Short videos can be encoded on-demond.
+3. Some videos are popular only in certain regions. There is no need to distribute these videos to other regions.
+4. Build your own CDN like Netflix and partern with ISPs. Building your CDN is a giant project.
+
+### Error handling
+- Upload error: Retry
+- Split video error: Older version of clients? let server do
+- Transcoding error: Retry
+- Preprocessor error: Regenerate DAG diagram
+- DAG scheduler error: Reschedule
+- Resource manager queue down: Replica
+- Task worker down: Retry on new node
+- API server down: Stateless server so request will be directed to a different server.
+- Metadata cache server down: Replica.
+- Metadata DB down: Replica with Master-slave.
