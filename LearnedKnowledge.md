@@ -893,3 +893,71 @@ YouTube video stream follow long-tail distribution. Many videos are rarely watch
 - API server down: Stateless server so request will be directed to a different server.
 - Metadata cache server down: Replica.
 - Metadata DB down: Replica with Master-slave.
+
+# Design google drive
+## High-level design
+### API
+#### Upload a file to Google Drive
+`https://api.example.com/files/upload?uploadType=resumable`    
+2 types of uploads are supported:
+- Simple upload. For small file.
+- Resumable upload. For large file.
+  - Send a initial request to retrieve the resumable URL
+  - Upload the data and monitor upload state
+  - If upload is distributed, resume the upload.
+
+#### Download a file from google drive
+`https://api.example.com/files/download?uploadType=resumable`    
+``` JSON
+Params:    
+{    
+  "path": "/recipes/soup/best_soup.txt"    
+}    
+```
+
+#### Get file revisions
+`https://api.example.com/files/list_revisions`    
+``` JSON
+Params:    
+{    
+  "path": "/recipes/soup/best_soup.txt",    
+  "limit": 20    
+}    
+```
+
+All APIs require user authentication and use HTTPS. Secure Socket Layer (SSL) protects data transfer between client and backend servers.
+
+### Sync conflicts
+The 1st version get processed wins, the second one receives the conflicts. The 2nd user will make the decision how to resolve the conflict.     
+
+### Design proposal
+![design](pics/gDriveDesign.png)
+Term explanations:
+- Block servers: Block servers upload blocks to cloud storage. Block storage, referred to as block-level storage, is a technology to store data files on cloud-based env. A file can be split into several blocks, each with a unique hash value, stored in our metadata database. Each block is treated as an independent object and stored in our storage system (e.g. AWS S3). To reconstruct a file, blocks are joined in a particular order. As for the block size, we use Dropbox as a reference: it sets the maximal size of a block to 4MB.
+- Cloud storage: A file is split into smaller blocks and stored in cloud storage.
+- Cold storage: Cold storage is a computer system designed for storing inactive data, meaning files are not accessed for a long time. 
+- Load balancer: A load balancer evenly distributes requests among API servers. 
+- API servers: These are responsible for almost everything other than the uploading flow. API servers are used for user authentication, managing user profile, updating file metadata, etc. 
+- Metadata database: It stores metadata of users, files, blocks, versions, etc. Please note that files are stored in the cloud and the metadata database only contains metadata.
+- Metadata cache: Some of the metadata are cached for fast retrieval.
+- Notification service: It is a publisher/subscriber system that allows data to be transferred from notification service to clients as certain events happen. In our specific case, notification service notifies relevant clients when a file is added/edited/removed elsewhere so they can pull the latest changes. 
+- Offline backup queue: If a client is offline and cannot pull the latest file changes, the offline backup queue stores the info so changes will be synced when the client is online. 
+
+## Design deep dive
+### Block servers
+Optimizations for uploading updated files:
+1. Delta sync: Only upload the modified block.
+2. Compression: Use different compression algorithms to compress different file types.
+**Block server**    
+![Block servers](pics/blockserver.png)
+
+**Delta sync**    
+![Delta sync](pics/deltasync.png)
+
+### High consistency requirement
+String consistency should apply to metadata cache and database layers.    
+The following 2 things are guaranteed for a strong consistency:
+- Data in cache replcas and the master is consistent.
+- Invalidate caches on database write to ensure cache and database hold the same value.
+
+### Metadata database
