@@ -439,7 +439,7 @@ Use hyprid model:
 ![Fanout](pics/fanout.png)
 
 ### Newsfeed retrieval deep dive
-[!workflow](pics/newsretrieval.png)
+![workflow](pics/newsretrieval.png)
 1. User request feeds
 2. LB routes request
 3. Web servers call the news feed service
@@ -756,7 +756,7 @@ workflow:
 
 The workflow can be divided into 2 parallel processes:
 #### Upload the actual video
-[upload_video](pics/upload_actual_video.png)
+![upload_video](pics/upload_actual_video.png)
 1. Videos are uploaded to the original storage
 2. Transcoding servers fetch videos from the original storage and start transcoding
 3. Once transcoding is complete, the following 2 steps are executed in parallel:
@@ -768,7 +768,7 @@ The workflow can be divided into 2 parallel processes:
 4. API servers inform the client the video is successfully uploaded and is ready for streaming.
    
 #### Update the metadata
-Overview:
+Overview:    
 ![metadata](pics/u2b_update_metadata.png)
 
 ### Video streaming flow
