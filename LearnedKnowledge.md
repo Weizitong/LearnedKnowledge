@@ -481,7 +481,7 @@ Client periodically poll messages from the server
 - It is inefficient. If a user does not chat much, long polling still makes periodic connections after timeouts.
 
 ### WebSocket
-![websocket](pics/webSocket.png)
+![websocket](pics/WebSocket.png)    
 WebSocket is a connectio which support bi-directional communication based on TCP. The WS can be used for both sending and receiving message.
 
 ### High-level design
