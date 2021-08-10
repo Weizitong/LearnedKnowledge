@@ -961,3 +961,63 @@ The following 2 things are guaranteed for a strong consistency:
 - Invalidate caches on database write to ensure cache and database hold the same value.
 
 ### Metadata database
+![dbschema](pics/dbschema.png)    
+- User: The user table contains basic information about the user.
+- Device: Device table stores device info. *Push_id* is used for sending and receiving mobile push notifications. Please note a user can have multiple devices.
+- Workspace: A workspace is the root directory of a user.
+- File: File table stores everything related to the latest file.
+- File_version: It stores version history of a file. Existing rows are read-only to keep the integrity of the file revision history.
+- Block: It stores everything related to a file block. A file of any version can be reconstructed by joining all the blocks in the correct order.
+
+### Upload flow
+![upload_flow](pics/fileUploadFlow.png)    
+2 requests are sent in parallel: add file metadata and upload the file to cloud storage. Both requests originate from the same client 1.
+- Add file metadata.
+  1. The client 1 sends a request to add the metadata of the new file. 
+  2. Store the new file metadata in metadata DB and change the file upload status to "pending".
+  3. Notify the notification service that a new file in being added.
+  4. The notification service notifies relevant clients (client 2) that a file is being uploaded.
+- Upload files to cloud storage.
+  1. Client 1 uploads the content of the file to block servers.
+  2. Block servers chunk the files into blocks, compress, encrypt the blocks, and upload them to cloud storage.
+  3. Once the file is uploaded, cloud storage triggers upload completion callback. The request is sent to API servers.
+  4. File status changed to "uploaded" in Metadata DB.
+  5. Notify the notification service that a file status is changed to "uploaded".
+  6. The notiification service notifies relevant clients (client 2) that a file is fully uploaded.
+Editing is same as created.
+
+### Download flow
+2 ways to let a client know when a file is added or updated:
+1. If client A is online while a file is changed by another client, notification service will inform client A that chagnes are made somewhere so it needs to pull the latest data.
+2. If client B is offline while a file is changed by another client, data will be saved to the cache. When the offline client is online again, it pulls the latest changes.
+
+Get the metatdata file firstly, then download the blocks to reconstruct the file. See below diagram:       
+![download_flow](pics/downloadfile.png)
+
+### Notification service
+To maintain file consistency, any mutation of a file performed locally needs to be informed to other clients to reduce conflicts. Notification service is built to serve this purpose. At the high-level, notification service allows data to be transferred to clients as events happen. Here are a few options:
+- Long polling. Dropbox uses long polling.
+- WebSocket. WebSocket provides a persistent connection between the client and the server.
+    
+Even though both options work well, we opt for long polling for the following 2 reasons:
+- Communication for notification service is not bi-directional.
+- WS is designed for real-time bi-directional communication.
+
+### Save storage space
+- De-duplicate data blocks. 2 blocks with the same hash value will be merged as one.
+- Adopt an intelligent data backup strategy. 2 optimization strategies can be applied:
+  1. Set a limit: Drop the oldest version if we store too many versions.
+  2. Keep valuable versions only: Limit the number of saved versions. We give more weight to recent versions.
+  3. Moving infrequently used data to cold storage. Could data is the data that has not been active for months or years.
+
+### Failure Handling
+- Load balancer failure: Primary/Secondary + heartbeat
+- Block server failure: Other servers pick up unfinished or pending jobs, if a block server fails.
+- Cloud storage failure: S3 buckets are replicated multiple times in different regions. If files are not available in one region, they can be fetched from different regions.
+- API server failure: Stateless service. Reroute request to other servers.
+- Metadata cache failure: Replica.
+- Metadata DB failure: Master/Slave + failover.
+- Notification service failure
+- Offline backup queue failure: Replica + re-subscribe
+
+
