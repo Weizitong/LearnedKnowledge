@@ -419,23 +419,30 @@ Besides communicating with clients, web servers enforce auth and rate-limiting.
 #### **Fanout service**
 ##### Fanout on write (push model)
 News feed is pre-computed during write time. Deliver to friemds immediately once it is published.    
-**Pros**    
+**Pros**        
 - The news feed is generated in real-time and can be pushed to friends immediately.
-- Fetching news feed is fast because the news feed is pre-computed during write time.
-**Cons**     
+- Fetching news feed is fast because the news feed is pre-computed during write time.    
+
+
+     
+**Cons**         
 - If a user has too many friends, fetching the friend list and generating news feed for all of them are slow and time consuming. It is called hotkey problem.
-- For inactive users or those rarely log-in, pre-computing news feeds waste computing resouces.
+- For inactive users or those rarely log-in, pre-computing news feeds waste computing resouces.    
 ##### Fanout on read (read model)
-The news is generated during the read time.
+The news is generated during the read time.    
 **Pros**    
 - For inactive users or those who rarely log in, fanout on read works better because it will not waste computing resouce on them.
-- Data in not pushed to friends so there is no hotkey problem
+- Data in not pushed to friends so there is no hotkey problem    
+    
+
 **Cons**     
 - Slow on updating feed.    
     
 Use hyprid model:    
 - For majority users, we use push.
 - For the users who have many friends, we use pull model to avoid system overload issue.
+
+
 ![Fanout](pics/fanout.png)
 
 ### Newsfeed retrieval deep dive
@@ -536,7 +543,7 @@ To achieve those, we can use a local id generator. (Use Twitter snowflake ID gen
 ## Dive deep
 ### Service discovery
 ![servicedisc](pics/servicedisc.png)
-The primary role of service discovery is to recommend the best chat server for a client absed on the criteria like geographical location, server capacity, etc. Apache Zookeeper is a popular open-source solution for service discovery.    
+The primary role of service discovery is to recommend the best chat server for a client based on the criteria like geographical location, server capacity, etc. Apache Zookeeper is a popular open-source solution for service discovery.    
 There are some other system we can use to provide service discovery like [Consul](https://www.consul.io/docs) and [Etcd](https://etcd.io/).
 
 ### Message flows
@@ -687,7 +694,7 @@ The improved design shows as follow:
 
 **Query service optimized**    
 - AJAX request. For web applications, browsers usually send AJAX requests to fetch autocomplete results. The main benefit of AJAX is that sending/receiving a request/response does not refresh the whole web page.
-- Browser cachng.
+- Browser caching.
 - Data sampling: We dont need to sample every request which are too many.
 
 ## Trie operations
@@ -733,10 +740,11 @@ A few tips here (need more reading materials):
 9. Can we leverage some of the existing cloud infra provided by Amazon, Google, or Microsoft?
 
 ## High-level design
-Overview:
+Overview:    
 ![overview](pics/u2b_overview.png)
-**Client**: Web, mobile, TV, etc     
-**CDN**: Videos are stored in CDN.    
+
+**Client**: Web, mobile, TV, etc      
+**CDN**: Videos are stored in CDN.     
 **API Servers**: Everything else except video streaming goes through API servers. This includes feed recommendation, generating video upload URL, updating metadata database and cache, user signup, etc.     
 
 ### Video uploading flow
@@ -755,7 +763,7 @@ workflow:
 - Completion handler: This consists of a list of workers that pull event data from the completion queue and update metadata cache and database.
 
 The workflow can be divided into 2 parallel processes:
-#### Upload the actual video
+#### Upload the actual video    
 ![upload_video](pics/upload_actual_video.png)
 1. Videos are uploaded to the original storage
 2. Transcoding servers fetch videos from the original storage and start transcoding
@@ -768,7 +776,7 @@ The workflow can be divided into 2 parallel processes:
 4. API servers inform the client the video is successfully uploaded and is ready for streaming.
    
 #### Update the metadata
-Overview:    
+Overview:        
 ![metadata](pics/u2b_update_metadata.png)
 
 ### Video streaming flow
@@ -783,7 +791,7 @@ Overview:
 Reasons for transcoding:
 - Raw video consumes large amount of storage space. An hour-long high definition video recorded at 60 frames per second can take up a few hundred GB of space.
 - Many devices and browers only support certain types of video formats. Thus, it is important to encode a video to different format for compatibility reason.
-- To ensure users watch high quality videos while maintaining smooth playback, ti is a good idea to deliver higher resolution video to users who have high network bandwidth and lower resolution video to users who have low bandwidth.
+- To ensure users watch high quality videos while maintaining smooth playback, it is a good idea to deliver higher resolution video to users who have high network bandwidth and lower resolution video to users who have low bandwidth.
 - Network conditions can change, especially on mobile devices. We should support auto/manually switch video quality based on the network condition.
 
 2 main parts of encoding formats:
@@ -948,7 +956,9 @@ Term explanations:
 Optimizations for uploading updated files:
 1. Delta sync: Only upload the modified block.
 2. Compression: Use different compression algorithms to compress different file types.
-**Block server**    
+
+    
+**Block server**        
 ![Block servers](pics/blockserver.png)
 
 **Delta sync**    
