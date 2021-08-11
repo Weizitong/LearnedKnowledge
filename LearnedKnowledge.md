@@ -52,7 +52,7 @@ geo-routed
 - Test and deployment: Automated deloyment tools are vital to keep services consistent through all data centesr.
 
 ## Message queue
-A message queue is a durable component, stored in memorty, that supports asynchronous communication.    
+A message queue is a durable component, stored in memory, that supports asynchronous communication.    
 
 Mainly used to decouple Producer and Consumer. We can scale the 2 componets individually.
 
