@@ -1030,4 +1030,139 @@ Even though both options work well, we opt for long polling for the following 2 
 - Notification service failure
 - Offline backup queue failure: Replica + re-subscribe
 
+# System Design Foundation Knowledge - Replication
+3 popular algorithms for replicating changes between nodes: **single-leader**, **multi-leaders**, **leaderless** replication.    
 
+## Leaders and Followers
+The most common solution for replicating is **leader-based replication** 
+![leader_based_replica](pics/leader_based_replica.png)
+1. A leader handles all write requests.
+2. The leader sends the data change to its followers as part of a replication log or change stream. Each follower takes the log from the leader and updates its local copy of the database accordingly, by applying all writes in the same order as they were processed on the leader.
+3. Both leader and followers handle read requests.
+
+## Synchronous VS Asynchronous Replication
+- Sync: Data durability. But latency might be too high
+- Async: Low latency. But may lose durability
+- Semi-Sync: If 1 follower ack is fine.
+
+## Setting up new followers
+1. Take a consistent snapshot of the leader's database at some PIT - if possible, without taking a lock on the entire database.
+2. Copy the snapshot to the new follower.
+3. The follower connects to the leader and requests all the data changes that have happended since the snapshot was taken. This requires that the snapshot is associated with an exact position in the leader's replication log.
+4. When the follower has processed the backlog of the data changes since the snapshot, we say it has caught up. It can continue to process data changes from the leader as they happen.
+
+## Handling Node Outages
+### Follower failure: Catch-up recovery
+All data replications are logged in the follower. After the follower gets recovered, the follower can request the rest of data to catch up the data change.
+
+### Leader failure: Failover
+1. Determine failure: Heart beat with threshold.
+2. Choose a new leader.
+3. Reconfig the system
+    
+With Async replica, we may have the following scenarios:
+1. Failovered new leader is not synced with the newest data -> Conflict and data loss
+2. Multiple leaders are promoted.
+3. The threshold is an art to calibrate.
+
+## Implementation of Replication Logs
+### Statement-based replication
+The intuition of replication is forwarding every INSERT, DELETE, UPDATE queries to all replicas.    
+However, the replication can be broken down if (Non-deterministic):
+- The statement has NOW() or RAND().
+- The statement has auto incrementment.
+- The statement has side effect (e.g. triggers, stored procedures, user-defined functions) may result in different side effects on different replica.
+
+### Write-ahead log (WAL) shipping
+The follower use the exact same data structure as found on the leader. 
+**Cons**: The log describes the data on a very low level (For B tree, which data applied to which disk block). Replication closely coupled to the storage engine. The cost of upgrading the version of the database is heavy.
+
+### Logical (row-based) log replication
+**Pros**: Decouple from the storage engine. Easily keep backward compatible.
+For SQL DB, a logical log describe a sequence of writes to database tables at the granularity of a row:
+- For an inserted row, the log contains the new values of all columns.
+- For a deleted row, the log contains enough info to uniquely identify the row that was deleted.
+- For an updated row, the log contains enough info to uniquely identify the updated row, and the new values of all columns.    
+A logical log format is also easier for external applications to parse. Usage: Data warehouse for offline analysis, or build custom indexes and caches. This technique is called *change data capture*.
+
+### Trigger-based replication
+*Triggers and stored procedures*. A trigger lets you register custom application code that is automatically executed when a data change (Write transaction) occurs in a database system.
+
+## Problems with Replication Lag
+### Reading Your Own Writes (Lag between primary and secondary)
+Guarantee the user can see his/her own data has been reflected. No guarantee for others.    
+Techniques:    
+- User A reads the own data from the learder database. Reads others from replica.
+- Time track based strategy to determine whether the client can read info from that replica or not. (All lag >= 1 min replicas will not be selected).
+- The client side holds the logical timestamp (Log sequence number) to determine whether a replica is "readable" or not.
+- If the replica across multiple datacenters, we always need to route request to the datacenter that contains the leader.
+    
+**Cross-device read-after-write consistency**    
+- Last update timestamp and other related metadata should be centralized.
+- If your replicas are distributed across different datacenters, there is no guarantee that connections from different devices will be routed to the same datacenter.
+
+### Monotonic Reads (Data moving backward in time)
+![Moving_backward](pics/moving_backward.png)    
+Ensure each user always makes their reads from the same replica. (Reroute if replica is down).
+
+### Consistent Prefix Reads (Violation of causality)
+![Violation_causality](pics/violation_causality.png)    
+Any writes that are causally related to each other are written to the same partition. (Might have efficiency issue).
+
+## Multiple-Leader Replication
+### Use Cases
+#### Multi-datacenter operation
+![Multi-master](pics/multi-master.png)
+Comparison between multi-leaders and single leaders:    
+**Performance**    
+Each request can be handled by local datacenters. Transaction replication is processed async.    
+
+**Tolerance of datacenter outages**    
+Each datacenter can continue operating independently of the others. Replication can be caught up when the failed datacenter comes back online.    
+
+**Tolerance of network problems**    
+A temporary network interruption does not prevent writes being processed.    
+The biggest downside is that: Concurrent modifications on the same table in different leaders. And other configuration like auto-increment, trigger and integrity constraints, etc can be hard to deal with.    
+
+#### Clients with offline operation
+Like calender app. Even if you device is offline, you still need to add and review meetings. After back online, we can do sync among different devices.    
+Each device is a “datacenter,” and the network connection between them is extremely unreliable.
+
+#### Collaborative editing
+Like Google Doc allows multiple people to concurrently edit a document. When a user edits a doc, the changes are instantly applied to their local replica and asynchronously replicated to the server and any other users who are editing the same doc.
+
+### Handling Write Conflicts
+![Write-conflict](pics/write_conflict.png)    
+
+#### Conflict avoidance
+The best way to resolve the conflict is avoiding them.    
+E.g. in an application where a user can edit their own data, you can ensure that request from a particular user are always routed to the same datacenter and use the leader in that datacenter for reading and writing. However, when the user moves or datacenter is down, then avoiding does not work.    
+
+#### Converging toward a consistent state
+ - Give each write a unique ID, pick the write with the highest ID as the winner, and throw away the other writes. If a timestamp is used, this technique is known as *last write wins* (LWW). Although this approach is popular, it is dangerously prone to data loss. 
+ - Given each replica a unique ID, and let writes that originated at a higher-number replica always take precedence over writes that originated at a lower-numbered replica. This approach also implies data loss.
+ - Record the conflict in an explicit data structure that preserve all info, and write application code that resolves the conflict at some time later (Perhaps by prompting the user).
+
+#### Custom conflict resolution logic
+Implement the custom conflict resolution logic by executed on:    
+- On write: Call hanlder while conflict happens on write
+- On read: Save all conflicts and surface it while read.
+
+#### Automatic Conflict Resolution
+- Conflict-free replicated datatype (e.g. ConcurrentHashMap)
+- Mergeable persistent data structures (Similar to Git version)
+- Operational transformation (Widely used in colaborative editing app, like Google Doc)
+
+### Multi-leader Replication Topologies
+A replication topology describes the communication paths along which writes are propagated from one node to another.    
+Conflicts can happen while 2 update or inserts have causal relationship, but route to different leaders. Simple all-to-all topology can have conflicts.
+
+## Leaderless Replication
+### Writing to the Database When a Node is Down
+Send write requests to all replicas. Ignore the down replica. While read the data, fix the stale data on previously unavailable node. Check the below figure:    
+![dynamo_fix](pics/dynamo_fix.png)    
+ 
+### Read repair and anti-entropy
+2 mechanisms are often used in Dynamo-style datastores:    
+- Read repair: Read from several nodes parallel. Detect and fix the stale responses.
+- Anti-entropy process: Background process that constantly looks for differences in the data between replicas and copies any missing data from one replica to another. Unlike the replication log in leader-based replication, this anti-entropy process does not copy writes in any particular order, and there may be significant delay before data is copied.
