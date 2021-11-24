@@ -1,97 +1,43 @@
-Tell me about yourself/ Tell me about your background
-Why Uber
-1. My current role in Microsoft Azure SQL DB team, is contributing the restore service. Database restore usually takes hours to finish and we use statemachine to do event tracking. Cx rarely takes restore to their database and the service highly focus on throughput but latency requirement is not very strict. But Uber requires low latency and high throughput in the same time. And Uber has grown to a huge company today, it proves the scalability and reliabilty of the Uber's system. I really want to join the Uber to learn how Uber design and build such an amazing system.  
+STAR 
+S: Situation
+T: Task
+A: Action
+R: Result
 
-Why leaving your current company
-from why uber.
-Most of time are fixing defect. This can be part of life and important skill but not want to be my whole life.
-
-Your strength
-Fast learner. Use known knowledge base to understand unknown. Take responsibility on multiple services
-Challenge: Try achieve more. LB improvement. How to leverage the existing metric with new.
-
-Your weakness
-Move too fast. Cause a regression. After a self-reflective, I found that I am too earger to deliver a result. I know plan well is == move fast. More haste, less speed. By working with senior engineers, fix the issue and rest of works, Spend more time on discussing the design and code carefully. And think ahead.
-
-Tell me about a project that your most proud of
-LB. Self-drive. collaborate with other teams. Host meeting. Propose idea. Almost eliminate restore block deployment issue.
-
-Tell me about the most challenging project you worked on.
-upgrade msdb. No one knows in microsoft. self-drive. test and try new methods.
-
-Tell me about a project that you had failed
-Design new SOS barrier. less invest most achievement
-
-Tell me about a time you took risk and succeed/failed
-Have an incident cx cannot restore. There is an outage. Use LB improve force restore to go to 1 cluster. Risk is all requests go to the same cluster. workload is too high. but succeed. 
-
-Tell me about a time you have to change the status quo
-deliver restore progress. have to delay the ETA because want to provide a customer obessed product. Progress can rolled back. 
-
-Tell me about a time you had to deal with tight deadline and you were able/not able to meet the target
-deliver restore progress. have to delay the ETA because want to provide a customer obessed product. Progress can rolled back. 
-ETA is important but trust is more significant
-
-Tell me about a time you had conflict with your manager/peer/colleagues
-I/E. kill request if mem usage is too high. I want to design it to more perfect. Use a complex algo to determine whether to kill. But staff eng wants to keep simple firstly. Hard to mitigation and not scalable. and over engineering.
-
-Tell me about a time you come up with a simple solution to a complex problem
-race condition. engine dispatcher. redesign need time to practice and take time. To resolve this complex issue, a simple fix firstly.
-
-Tell me about a time you come up with a new approach to an old problem
+最Challenge的project
+ans: The most challenge task for me is that the load balancer's improvement project.
+A brief backgound here: Our team is supporint XDB Backup/Restore features. For the restore, it creates a new db and restore data and replay transaction log on that brand new database. Our deployment team kicks off code deployment every month. During the deployment, we need to shut down the node and replace the binary files. However, if a custmer issued restore request on that node, we cannot perform the upgrade. And it will become a blocker. Sometimes, the deployment train may carry important hot patch to mitigate live site issue, the blocker can be vital. My task is improving the current LB to route the restore request to the node which has done the upgrade or the upgrade request will be engaged on this node days later. 
+The code is simple ---- add a new metric into the load balancer, however, how large weight will you put on this new metric? what is priority of this metric. Other request like creating db or copy db also share this LB, will it impact other teams and other services. These are the challenge.
+The first thing I did is understanding the pain point from Deployment team. What exact result we want? Since, it still have some possibilities that few restore requsts still block the deployment. But what is the percentage of total restore requests we want to put them away? I mean 1% total leaking requests is acceptable? Or 0.5% is acceptable? After that, have multiple meetings with Control plane team. To understand the code base on the current load balancer. How does it work today? How we evaluate the metrics and how we prioritize them. Then, finally give a design and ask all my teammates and above mentioned 2 team coworkers review my design. 
+Durign this project, technical part, I learned how to use WCF, how to use StateMachine as a event tracker to track each request state. How modern api gateway, load balancer leverage loads among different nodes.
+Leadership part, I learned how to drive my own project by collaborating with different teams. How to estimate the impact, etc.
+ 
+如何处理同事Conflict
+I still want to use the project I mentioned above, so during the design review. There are a lot of engineers and managers from other teams tried to "guard" their own code. But as the biggest stakeholder and main driver of this project. I should be bold, be open. So after the meeting, I set aside the conflicts and summary up the suggestions from other teams, like what impact on the other requests, how to evaluate the metrics calculation. I developed multiple prototypes and checked in them into stage clusters and evaluate them individually. Work with performance team, evaluate is there any increasing in request latency. Are workload among differnt nodes become uneven? Like node A cpu usage is 90, but B is only 12. Finally, collect all experiments' data and absorb other folks' suggestion to modify the initial design.
+I learned how to drive a cross-team, cross-org project. How to understand other team's concern and convert their concerns to the roadmap of my project. I learned how to widen the impact of your project. Like during this project, Deployment team and I together implement a dashboard to monitor deployment status.  
 
 
-Tell me about a time you received negative feedback from your manager
-quality, move too fast
+有没有同事或老板给你Critical comments, 之后如何处理
+I just have a critical comment recently, Phanindra. A knowledge for a new hire
 
-Tell me about a time you made a decision without your manager’s approval
-mitigate live site issue. The goal is cx obsession and trust on our quality. 
+别人东西Delay怎么办
+Francesco, refactor connection interface. I mentor him. delay on his project. Understand his blockers cannot test (Env setup -- use local VM. the path point to physical machine path). manager push. Sync with manager. Share the burden from him.
 
-Tell me about a time you had to make a decision when there is not enough data or information
-live site. incident. dont have much cx issue. use other service to workaround firstly. and do RCA later. never make any decision you dont know about the outcome. 
+Project一开始没方向该怎么办
+Restore progress. Dont know where to start. Sync with my mentor. Do experiment to understand workflow. Understand how statemachine track the event. Use debugger to go through code line by line. 1:1 with mentor. To express my thought.
+Learn: Get more clarity before start. should be bold. Dont be afraid to make change to do experiment.
 
-Tell me about a time you were assigned a project with unclear responsibility
-investigate salesforce. Other engineer should work on. But I asked to investigate. Take ownership. we all own the service. The goal is providing a cx obessed product. drive the investigation meeting. work with PM. Report to cx and receive feedback periodically.
+有External Obstacle怎么处理
+review design on LB
 
-Tell me about a time you had to sacrifice short term gains for the long term goals
-dispatcher, design an exception handling dispathcher
+最有趣的Project
+lb
 
-Tell me about a time you were 50%/75% on a project and found you have made a mistake and have to change direction
-plb. new column. redesign. delay deliver but important to ensure quality.
+想去什么组
+VR/AR team. Because metaverse. <<Ready player one>> and <<Free guy>>
 
-Tell me about a time you came up with a solution that customer didn’t ask and they end up like it
-provide a script to auto mitigation. I/E lib has issue. We dont own. But cx obsessed product. I write a powershell script to mitigate.
+为什么想加入FB
+Move fast
 
-Tell me about a time that customer tell you they want something but you know that’s not really what they want
-geo -> db copy. cx db get dropped wants to recovery
-
-Tell me about a time you had to convince the team/convinced by the team
-restore progress. Send an alert to dev. restore hung. too many edge cases.
-
-Tell me about a project that you have to overcome big obstacle
-plb no one knows upgrade.
-
-Tell me about an experience that you have to earn trust/gain buy-in from another group
-dynamic folks rely on us to resolve this incident.
-
-Tell me about a time you step outside of your job scope and solved a problem
-I/E lib issue.
-
-What is your proudest/biggest innovation
-Restore router. Because highly eliminate the number of sev2. Save my teamates and me.
-
-How do you select metric to measure your project success
-Result and Cx 1st. Obsessed? user friendly? How teamate evl? How cx evl from CSS and cx. How actual perf
-
-Have you ever learn something new by yourself and end up using what you learn to solve problems at work
-dispatcher, exception handling
-
-If you have conflicting goals, how do you make trad-off
-cx firtsly, big impact to cx first. 2. livesite issue first then feature improvement
-
-Tell me about a time you have to seek outside help to dive deep on a problem to find the solution
-plb
-
-Tell me about a time you decided to take on a project instead of being assigned to you
-test quality. assigned to senior folks. But help them leverage. ownership
-
+Any regression on your project.
+new state in restore request state machine. To mitigate live site issue. But geo restore. No source server name. Why leak? Urgent!!! Must mitigate immediately
